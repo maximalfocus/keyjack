@@ -13,8 +13,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify through the Docker Compose boundary
-        run: docker compose up --build --abort-on-container-exit --exit-code-from harness
+        env:
+          KEYJACK_ACK_VULNERABLE: i-understand-this-is-intentionally-vulnerable
+        run: >-
+          docker compose --profile verify up --build
+          --abort-on-container-exit --exit-code-from harness
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile verify down -v
