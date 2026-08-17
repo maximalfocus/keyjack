@@ -96,3 +96,20 @@ def test_signature_round_trip_and_tamper() -> None:
         unit_price_cents=189_000, restricted=True, line_total_cents=189_000,
     )
     assert verify("a-key", tampered, sig) is False
+
+
+def test_canonical_includes_verdict_only_when_present() -> None:
+    from keyjack.signing import canonical_order_string
+
+    without = canonical_order_string(
+        part_number="PN-7741", quantity=1, work_order_id="WO-1001",
+        unit_price_cents=1, restricted=False, line_total_cents=1,
+    )
+    with_verdict = canonical_order_string(
+        part_number="PN-7741", quantity=1, work_order_id="WO-1001",
+        unit_price_cents=1, restricted=False, line_total_cents=1,
+        within_limit=True, requires_supervisor=False,
+    )
+    assert "within_limit" not in without
+    assert "within_limit=true" in with_verdict
+    assert "requires_supervisor=false" in with_verdict

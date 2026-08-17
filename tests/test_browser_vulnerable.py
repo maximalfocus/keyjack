@@ -17,7 +17,7 @@ def _login(page: Page, base_url: str, account: str, password: str) -> None:
 
 
 def test_signing_key_is_readable_in_served_source(vuln_page: Page, vuln_base_url: str) -> None:
-    source = vuln_page.request.get(f"{vuln_base_url}/static/vulnerable/client.js").text()
+    source = vuln_page.request.get(f"{vuln_base_url}/static/app/client.js").text()
     # The key the server verifies against is delivered to the browser, in the clear.
     assert "SIGNING_KEY" in source
     assert "ninebark-demo-signing-key" in source

@@ -34,19 +34,28 @@ def canonical_order_string(
     unit_price_cents: int,
     restricted: bool,
     line_total_cents: int,
+    within_limit: bool | None = None,
+    requires_supervisor: bool | None = None,
 ) -> str:
-    """A deterministic serialization both the client and server compute identically."""
+    """A deterministic serialization both the client and server compute identically.
 
-    return "\n".join(
-        [
-            f"part_number={part_number}",
-            f"quantity={quantity}",
-            f"work_order_id={work_order_id}",
-            f"unit_price_cents={unit_price_cents}",
-            f"restricted={'true' if restricted else 'false'}",
-            f"line_total_cents={line_total_cents}",
-        ]
-    )
+    The authorization verdict lines are appended only when present, so a body without a
+    verdict signs identically to the earlier signing-key-only form.
+    """
+
+    lines = [
+        f"part_number={part_number}",
+        f"quantity={quantity}",
+        f"work_order_id={work_order_id}",
+        f"unit_price_cents={unit_price_cents}",
+        f"restricted={'true' if restricted else 'false'}",
+        f"line_total_cents={line_total_cents}",
+    ]
+    if within_limit is not None:
+        lines.append(f"within_limit={'true' if within_limit else 'false'}")
+    if requires_supervisor is not None:
+        lines.append(f"requires_supervisor={'true' if requires_supervisor else 'false'}")
+    return "\n".join(lines)
 
 
 def sign(key: str, message: str) -> str:

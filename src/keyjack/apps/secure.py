@@ -33,8 +33,8 @@ from .common import (
 
 def create_secure_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    app, rt = build_app("keyjack (secure)", settings)
-    register_pages(app, rt, vulnerable=False, client_src="/static/secure/client.js")
+    app, rt = build_app("keyjack (secure)", settings, "secure")
+    register_pages(app, rt, vulnerable=False, client_src="/static/app/client.js")
     register_auth(app, rt)
     register_reads(app, rt)
     register_workflow(app, rt)

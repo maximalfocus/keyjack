@@ -75,6 +75,31 @@ services:
     networks: [demo, edge]
     healthcheck: *healthcheck
 
+  # Half-fixed variant — the plausible remediations applied, defeated anyway. Same opt-ins.
+  halffixed-app:
+    profiles: [verify, vulnerable]
+    build:
+      context: .
+    image: keyjack-app
+    command:
+      - uvicorn
+      - keyjack.apps.halffixed:create_halffixed_app
+      - --factory
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+    environment:
+      KEYJACK_MODE: half-fixed
+      KEYJACK_DB_URL: "sqlite+pysqlite:////data/keyjack.db"
+      KEYJACK_RESEED: "1"
+      KEYJACK_ACK_VULNERABLE: "${KEYJACK_ACK_VULNERABLE:-}"
+    <<: *hardening
+    ports:
+      - "127.0.0.1:8002:8000"
+    networks: [demo, edge]
+    healthcheck: *healthcheck
+
   harness:
     profiles: [verify]
     build:
@@ -86,9 +111,12 @@ services:
         condition: service_healthy
       vulnerable-app:
         condition: service_healthy
+      halffixed-app:
+        condition: service_healthy
     environment:
       KEYJACK_BASE_URL: "http://app:8000"
       KEYJACK_VULN_BASE_URL: "http://vulnerable-app:8000"
+      KEYJACK_HALFFIXED_BASE_URL: "http://halffixed-app:8000"
       KEYJACK_IN_DEMO_NET: "1"
     networks: [demo]
 

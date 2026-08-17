@@ -29,7 +29,10 @@ class PickupRequest(BaseModel):
 
 class SignedOrderRequest(BaseModel):
     """The vulnerable app's order body: the client signs price/restriction/total and the
-    server trusts them once the signature verifies. Forgeable by anyone holding the key."""
+    server trusts them once the signature verifies. Forgeable by anyone holding the key.
+
+    ``within_limit`` / ``requires_supervisor`` are the optional client-computed verdict: when
+    present, the vulnerable server routes on them instead of recomputing (the verdict sink)."""
 
     part_number: str
     quantity: int = Field(gt=0)
@@ -37,6 +40,8 @@ class SignedOrderRequest(BaseModel):
     unit_price_cents: int
     restricted: bool
     line_total_cents: int
+    within_limit: bool | None = None
+    requires_supervisor: bool | None = None
 
 
 class AccountOut(BaseModel):

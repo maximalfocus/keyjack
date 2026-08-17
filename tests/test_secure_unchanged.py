@@ -26,6 +26,9 @@ FORGED_ORDER: dict[str, object] = {
     "unit_price_cents": 1,
     "restricted": False,
     "line_total_cents": 1,
+    # Also smuggle a forged verdict; the secure app ignores it just the same.
+    "within_limit": True,
+    "requires_supervisor": False,
 }
 FORGED_SIG = sign(
     DEMO_SIGNING_KEY,
