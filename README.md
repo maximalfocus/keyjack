@@ -23,11 +23,19 @@ server-side KDF (Argon2id), and each pickup code from a CSPRNG. The dependency-f
 submits order *intent* only and keeps a purely cosmetic "this needs supervisor approval" hint to prove
 a client-side check is a fine affordance and a worthless control.
 
-**Vulnerable contrasts (opt-in).** A vulnerable variant whose client holds an HMAC key as a source
-constant, signs the order body with WebCrypto, and posts its own authorization verdict. The server
-verifies the signature **correctly** and is defeated anyway, because the key is shipped to every
-browser: a forged order for a restricted part — false price and restriction fields, or a flipped
-`within_limit` / `requires_supervisor` verdict — is auto-approved.
+**Vulnerable contrasts (opt-in).** A vulnerable variant that delegates four decisions to a browser
+the attacker owns:
+
+- an **embedded HMAC key** the client signs order bodies with — the server verifies correctly and is
+  defeated anyway, because the key is shipped to every browser;
+- a **client-computed verdict** (`within_limit` / `requires_supervisor`) the server routes on;
+- a **client-hashed credential** — the client posts `SHA-256(password)` "so the password never
+  leaves the device", so the digest *is* the credential and a captured digest authenticates; and
+- a **weak pickup code** the client mints as `PU-<created_at>-<three Math.random() digits>`, which
+  the shared order queue discloses enough of to enumerate a fixed ≤1,000-candidate window.
+
+Each one converges on the same outcome: a restricted, over-limit part obtained with no supervisor
+decision.
 
 **The half-fixed variant.** Applies every plausible remediation — server-side verification retained,
 the key removed from the source file and served from `/api/client-config` at runtime, the client
@@ -75,12 +83,18 @@ restricted part, submits it, and prints the key's source, the request, the respo
 
 ```sh
 # against the vulnerable app (http://127.0.0.1:8001):
-keyjack-attack --base-url http://127.0.0.1:8001 embedded-key      # forge price/restriction
-keyjack-attack --base-url http://127.0.0.1:8001 client-verdict    # forge the verdict
+keyjack-attack --base-url http://127.0.0.1:8001 embedded-key                 # forge price/restriction
+keyjack-attack --base-url http://127.0.0.1:8001 client-verdict               # forge the verdict
+keyjack-attack --base-url http://127.0.0.1:8001 replay-digest                # replay the supervisor digest
+keyjack-attack --base-url http://127.0.0.1:8001 enumerate-pickup --order ORD-… # guess a weak code
 
 # against the half-fixed app (http://127.0.0.1:8002): the key is read from its runtime config
 keyjack-attack --base-url http://127.0.0.1:8002 half-fixed
 ```
+
+The `enumerate-pickup` subcommand tries a fixed window of at most 1,000 codes derived from the
+disclosed timestamp and prints its candidate count and bound. There is no wordlist, no
+general-purpose brute-force tool, and no `Math.random()` state-recovery code anywhere in the repo.
 
 Fresh deterministic state is seeded on every start. Demo accounts:
 

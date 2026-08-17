@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import httpx
 
+from keyjack.hashing import sha256_hex
 from keyjack.signing import DEMO_SIGNING_KEY, canonical_order_string, sign
 
 DEMO_PASSWORDS = {
@@ -17,8 +18,10 @@ DEMO_PASSWORDS = {
 
 
 def vlogin(client: httpx.Client, account: str) -> None:
+    # The vulnerable app takes a SHA-256 digest, not the password.
     res = client.post(
-        "/api/login", json={"account_id": account, "password": DEMO_PASSWORDS[account]}
+        "/api/login",
+        json={"account_id": account, "password_digest": sha256_hex(DEMO_PASSWORDS[account])},
     )
     assert res.status_code == 200, res.text
 

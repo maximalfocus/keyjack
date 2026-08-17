@@ -8,13 +8,15 @@ exact route, which is why its remediations change nothing.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy.orm import Session as DbSession
 
 from ..audit import REASON_ORDER_CREATED, emit_audit, new_correlation_id
-from ..clock import utcnow
+from ..clock import from_epoch, utcnow
 from ..domain import Authorization, compute_authorization, route_state
-from ..models import Account, Order, OrderState, Part, Role, WorkOrder
+from ..models import Account, Order, OrderState, Part, PickupCode, Role, WorkOrder
 from ..schemas import OrderOut, SignedOrderRequest
 from ..signing import DEMO_SIGNING_KEY, canonical_order_string, verify
 from .common import (
@@ -54,6 +56,8 @@ def register_body_trusting_order_route(app: FastAPI, rt: AppRuntime) -> None:
             line_total_cents=body.line_total_cents,
             within_limit=body.within_limit,
             requires_supervisor=body.requires_supervisor,
+            pickup_code=body.pickup_code,
+            created_at_epoch=body.created_at_epoch,
         )
         if not verify(DEMO_SIGNING_KEY, canonical, signature):
             raise HTTPException(status_code=400, detail="invalid_signature")
@@ -80,6 +84,9 @@ def register_body_trusting_order_route(app: FastAPI, rt: AppRuntime) -> None:
         state = route_state(authorization)
 
         now = utcnow()
+        # The client-minted weak code's created_at is disclosed by the shared queue, so store
+        # the exact second the client used; otherwise use the server clock.
+        created_at = from_epoch(body.created_at_epoch) if body.created_at_epoch else now
         order = Order(
             id=new_order_id(),
             account_id=actor.id,
@@ -90,10 +97,21 @@ def register_body_trusting_order_route(app: FastAPI, rt: AppRuntime) -> None:
             line_total_cents=body.line_total_cents,
             restricted=body.restricted,
             state=state,
-            created_at=now,
+            created_at=created_at,
         )
         db.add(order)
-        if state is OrderState.AUTO_APPROVED:
+        if body.pickup_code is not None:
+            # THE VULNERABILITY: store the client-minted, guessable pickup code verbatim.
+            db.add(PickupCode(
+                id=new_order_id()[4:16],
+                code=body.pickup_code,
+                order_id=order.id,
+                owner_account_id=actor.id,
+                used=False,
+                created_at=created_at,
+                expires_at=created_at + timedelta(seconds=settings.pickup_ttl_seconds),
+            ))
+        elif state is OrderState.AUTO_APPROVED:
             issue_pickup_code(db, order, now, settings.pickup_ttl_seconds)
         emit_audit(db, correlation_id=new_correlation_id(), actor=actor.id,
                    route="/api/orders", reason_code=REASON_ORDER_CREATED)

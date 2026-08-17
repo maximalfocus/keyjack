@@ -11,3 +11,9 @@ from datetime import UTC, datetime
 
 def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def from_epoch(epoch: int) -> datetime:
+    """Naive UTC datetime for a Unix epoch second (used by the weak client-minted code)."""
+
+    return datetime.fromtimestamp(epoch, tz=UTC).replace(tzinfo=None)

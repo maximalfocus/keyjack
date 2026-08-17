@@ -49,7 +49,19 @@ function canonicalOrder(o) {
   if (o.requires_supervisor !== undefined) {
     lines.push(`requires_supervisor=${o.requires_supervisor ? "true" : "false"}`);
   }
+  if (o.pickup_code !== undefined) lines.push(`pickup_code=${o.pickup_code}`);
+  if (o.created_at_epoch !== undefined) {
+    lines.push(`created_at_epoch=${o.created_at_epoch}`);
+  }
   return lines.join("\n");
+}
+
+// SHA-256 of the password, computed in the browser and posted instead of the password. The
+// UI tells the user "your password never leaves this device" — but the digest IS the
+// credential now, so a captured digest authenticates just as well.
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // HMAC-SHA256 with the embedded key, via WebCrypto. Conventional, correct — and pointless
@@ -151,11 +163,13 @@ function setMessage(text) {
 document.addEventListener("DOMContentLoaded", () => {
   $("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    // "Your password never leaves this device" — we post its SHA-256 digest instead.
+    const digest = await sha256Hex($("password").value);
     const res = await api("/api/login", {
       method: "POST",
       body: JSON.stringify({
         account_id: $("account-id").value,
-        password: $("password").value,
+        password_digest: digest,
       }),
     });
     setMessage(res.ok ? "" : "Sign-in failed.");
@@ -179,6 +193,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // facts and a false verdict just as well.
     const lineTotal = part.unit_price_cents * qty;
     const withinLimit = lineTotal <= me.approval_limit_cents;
+    // Weak pickup code: a disclosed timestamp plus three digits of Math.random().
+    const epoch = Math.floor(Date.now() / 1000);
+    const suffix = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
     const order = {
       part_number: part.part_number,
       quantity: qty,
@@ -188,6 +205,8 @@ document.addEventListener("DOMContentLoaded", () => {
       line_total_cents: lineTotal,
       within_limit: withinLimit,
       requires_supervisor: part.restricted || !withinLimit,
+      pickup_code: `PU-${epoch}-${suffix}`,
+      created_at_epoch: epoch,
     };
     const signature = await sign(canonicalOrder(order));
     const res = await api("/api/orders", {
