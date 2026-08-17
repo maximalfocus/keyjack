@@ -124,3 +124,16 @@ Fresh deterministic state is seeded on every start. Demo accounts:
 - `tests/` — unit, API, in-process, browser, opt-in-gate, and containment tests.
 - `compose.yaml` — the two-network stack: an internal, egress-free `demo` network for the apps and
   harness, and an `edge` network used only to publish loopback ports for manual exploration.
+
+## Boundaries
+
+keyjack is a teaching demonstration, not a product. It is not deployed, hosted, or exposed beyond
+loopback; it ships no package, image, or public endpoint; and it makes no hosting or production claim.
+There is no support SLA, no guaranteed response time, and no long-term compatibility commitment. The
+`vulnerable` and `half-fixed` applications are intentionally exploitable and gated behind two
+deliberate opt-in actions — see [`SECURITY.md`](SECURITY.md).
+
+## License & contributing
+
+MIT — see [`LICENSE`](LICENSE). Contributions welcome within the project's scope; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md).
