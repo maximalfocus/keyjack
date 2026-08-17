@@ -36,11 +36,13 @@ def canonical_order_string(
     line_total_cents: int,
     within_limit: bool | None = None,
     requires_supervisor: bool | None = None,
+    pickup_code: str | None = None,
+    created_at_epoch: int | None = None,
 ) -> str:
     """A deterministic serialization both the client and server compute identically.
 
-    The authorization verdict lines are appended only when present, so a body without a
-    verdict signs identically to the earlier signing-key-only form.
+    Optional lines (verdict, client-minted pickup code) are appended only when present, so a
+    body without them signs identically to the earlier forms.
     """
 
     lines = [
@@ -55,6 +57,10 @@ def canonical_order_string(
         lines.append(f"within_limit={'true' if within_limit else 'false'}")
     if requires_supervisor is not None:
         lines.append(f"requires_supervisor={'true' if requires_supervisor else 'false'}")
+    if pickup_code is not None:
+        lines.append(f"pickup_code={pickup_code}")
+    if created_at_epoch is not None:
+        lines.append(f"created_at_epoch={created_at_epoch}")
     return "\n".join(lines)
 
 

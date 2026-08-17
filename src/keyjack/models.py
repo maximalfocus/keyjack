@@ -40,6 +40,9 @@ class Account(Base):
     approval_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Argon2id output for the secure credential path. Only the KDF output is stored.
     kdf_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256(password) for the *vulnerable* digest-comparing login. The digest is the
+    # credential here — a captured digest authenticates.
+    sha256_digest: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class Part(Base):

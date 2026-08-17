@@ -10,6 +10,7 @@ from argon2 import PasswordHasher
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from .hashing import sha256_hex
 from .models import Account, Base, Part, Role, WorkOrder
 from .security import hash_password
 
@@ -20,32 +21,37 @@ DEMO_PASSWORDS: dict[str, str] = {
     "sup-navarro": "navarro-ninebark-demo",
 }
 
+# A checked-in fictional fixture: the exact SHA-256 digest the supervisor's browser computes
+# and posts to the vulnerable app. The demonstration replays this value — nothing is cracked.
+CAPTURED_SUPERVISOR_DIGEST = (
+    "5c522054065bac54624ac2c84cc76739682fe1b36f49a64f5a4cfbdd37f39881"
+)
+
 TECHNICIAN_LIMIT_CENTS = 25_000  # $250.00 server-held approval limit.
+
+
+def _account(
+    hasher: PasswordHasher, account_id: str, display_name: str, role: Role,
+    limit: int | None,
+) -> Account:
+    password = DEMO_PASSWORDS[account_id]
+    return Account(
+        id=account_id,
+        display_name=display_name,
+        role=role,
+        approval_limit_cents=limit,
+        kdf_hash=hash_password(hasher, password),
+        sha256_digest=sha256_hex(password),
+    )
 
 
 def _accounts(hasher: PasswordHasher) -> list[Account]:
     return [
-        Account(
-            id="tech-avery",
-            display_name="Avery (Technician)",
-            role=Role.TECHNICIAN,
-            approval_limit_cents=TECHNICIAN_LIMIT_CENTS,
-            kdf_hash=hash_password(hasher, DEMO_PASSWORDS["tech-avery"]),
-        ),
-        Account(
-            id="tech-brooks",
-            display_name="Brooks (Technician)",
-            role=Role.TECHNICIAN,
-            approval_limit_cents=TECHNICIAN_LIMIT_CENTS,
-            kdf_hash=hash_password(hasher, DEMO_PASSWORDS["tech-brooks"]),
-        ),
-        Account(
-            id="sup-navarro",
-            display_name="Navarro (Supervisor)",
-            role=Role.SUPERVISOR,
-            approval_limit_cents=None,
-            kdf_hash=hash_password(hasher, DEMO_PASSWORDS["sup-navarro"]),
-        ),
+        _account(hasher, "tech-avery", "Avery (Technician)", Role.TECHNICIAN,
+                 TECHNICIAN_LIMIT_CENTS),
+        _account(hasher, "tech-brooks", "Brooks (Technician)", Role.TECHNICIAN,
+                 TECHNICIAN_LIMIT_CENTS),
+        _account(hasher, "sup-navarro", "Navarro (Supervisor)", Role.SUPERVISOR, None),
     ]
 
 

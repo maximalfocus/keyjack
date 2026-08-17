@@ -7,6 +7,7 @@ order-creation route — which is exactly where the client-side-crypto-misuse le
 
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from ..models import Account, Base, Order, OrderState, Part, PickupCode, Role, W
 from ..models import Session as SessionRow
 from ..schemas import (
     AccountOut,
+    DigestLoginRequest,
     LoginRequest,
     OrderDetailOut,
     OrderOut,
@@ -199,30 +201,49 @@ def register_pages(
         return config
 
 
-def register_auth(app: FastAPI, rt: AppRuntime) -> None:
+def _kdf_login_ok(request: Request, account: Account | None, payload: object) -> bool:
+    hasher = _hasher(request)
+    data = LoginRequest.model_validate(payload)
+    if account is None:
+        # Verify against a decoy to equalise timing; the result is discarded.
+        verify_password(hasher, cast(str, request.app.state.decoy_hash), data.password)
+        return False
+    return verify_password(hasher, account.kdf_hash, data.password)
+
+
+def _digest_login_ok(account: Account | None, payload: object) -> bool:
+    # THE VULNERABILITY: the submitted digest *is* the credential. A captured digest wins.
+    data = DigestLoginRequest.model_validate(payload)
+    if account is None:
+        hmac.compare_digest("0" * 64, data.password_digest)  # equalise timing
+        return False
+    return hmac.compare_digest(account.sha256_digest, data.password_digest)
+
+
+def register_auth(app: FastAPI, rt: AppRuntime, *, digest: bool = False) -> None:
     settings = rt.settings
+
+    def account_id_of(payload: object) -> str:
+        if isinstance(payload, dict):
+            return str(payload.get("account_id", "unknown"))
+        return "unknown"
 
     @app.post("/api/login")
     async def login(request: Request, db: DbSession = Depends(get_db)) -> Response:
-        hasher = _hasher(request)
         try:
             payload = await request.json()
-            data = LoginRequest.model_validate(payload)
+            account = db.get(Account, account_id_of(payload))
+            ok = _digest_login_ok(account, payload) if digest else _kdf_login_ok(
+                request, account, payload
+            )
         except Exception:
             emit_audit(db, correlation_id=new_correlation_id(), actor="unknown",
                        route="/api/login", reason_code=REASON_LOGIN_FAILED)
             db.commit()
             raise GENERIC_401 from None
 
-        account = db.get(Account, data.account_id)
-        if account is None:
-            verify_password(hasher, cast(str, request.app.state.decoy_hash), data.password)
-            ok = False
-        else:
-            ok = verify_password(hasher, account.kdf_hash, data.password)
-
         if not ok or account is None:
-            emit_audit(db, correlation_id=new_correlation_id(), actor=data.account_id,
+            emit_audit(db, correlation_id=new_correlation_id(), actor=account_id_of(payload),
                        route="/api/login", reason_code=REASON_LOGIN_FAILED)
             db.commit()
             raise GENERIC_401
@@ -297,7 +318,9 @@ def register_reads(app: FastAPI, rt: AppRuntime) -> None:
         return out
 
 
-def register_workflow(app: FastAPI, rt: AppRuntime) -> None:
+def register_workflow(
+    app: FastAPI, rt: AppRuntime, *, enforce_pickup_owner: bool = True
+) -> None:
     settings = rt.settings
 
     @app.post("/api/orders/{order_id}/approve")
@@ -314,7 +337,10 @@ def register_workflow(app: FastAPI, rt: AppRuntime) -> None:
         now = utcnow()
         order.state = OrderState.APPROVED
         order.approved_by = actor.id
-        issue_pickup_code(db, order, now, settings.pickup_ttl_seconds)
+        # Issue a server code only if the order has none — a client-minted (weak) code, where
+        # one was posted, is deliberately preserved so the vulnerable pickup sink is real.
+        if order.pickup_code is None:
+            issue_pickup_code(db, order, now, settings.pickup_ttl_seconds)
         emit_audit(db, correlation_id=new_correlation_id(), actor=actor.id,
                    route="/api/orders/approve", reason_code=REASON_ORDER_APPROVED)
         db.commit()
@@ -348,12 +374,12 @@ def register_workflow(app: FastAPI, rt: AppRuntime) -> None:
         row = db.execute(
             select(PickupCode).where(PickupCode.code == body.code)
         ).scalars().first()
-        if (
-            row is None
-            or row.used
-            or row.expires_at < now
-            or row.owner_account_id != actor.id
-        ):
+        # The secure parts desk binds the code to its owner; the vulnerable one (opt-out)
+        # accepts the code from anyone who presents it — the weak-pickup sink.
+        owner_ok = not enforce_pickup_owner or (
+            row is not None and row.owner_account_id == actor.id
+        )
+        if row is None or row.used or row.expires_at < now or not owner_ok:
             emit_audit(db, correlation_id=new_correlation_id(), actor=actor.id,
                        route="/api/pickup", reason_code=REASON_PICKUP_REFUSED)
             db.commit()

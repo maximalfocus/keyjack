@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import httpx
 
+from keyjack.hashing import sha256_hex
 from keyjack.signing import DEMO_SIGNING_KEY, canonical_order_string, sign
 
 
 def vlogin(client: httpx.Client) -> None:
     res = client.post(
-        "/api/login", json={"account_id": "tech-avery", "password": "avery-ninebark-demo"}
+        "/api/login",
+        json={"account_id": "tech-avery",
+              "password_digest": sha256_hex("avery-ninebark-demo")},
     )
     assert res.status_code == 200
 

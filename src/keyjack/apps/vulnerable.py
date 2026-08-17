@@ -45,8 +45,8 @@ def create_vulnerable_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     app, rt = build_app("keyjack (VULNERABLE)", settings, "vulnerable")
     register_pages(app, rt, vulnerable=True, client_src="/static/app/client.js")
-    register_auth(app, rt)
+    register_auth(app, rt, digest=True)  # the client-hashed credential sink
     register_reads(app, rt)
-    register_workflow(app, rt)
+    register_workflow(app, rt, enforce_pickup_owner=False)  # the weak-pickup sink
     register_body_trusting_order_route(app, rt)
     return app

@@ -23,6 +23,24 @@ def test_signing_key_is_readable_in_served_source(vuln_page: Page, vuln_base_url
     assert "ninebark-demo-signing-key" in source
 
 
+def test_client_hashes_the_password_before_login(
+    vuln_page: Page, vuln_loopback_url: str
+) -> None:
+    # Driven over loopback for a secure context (WebCrypto), as a human on 127.0.0.1 would be.
+    vuln_page.goto(f"{vuln_loopback_url}/")
+    vuln_page.wait_for_selector("#login-view:not([hidden])")
+    vuln_page.fill("#account-id", "tech-avery")
+    vuln_page.fill("#password", "avery-ninebark-demo")
+    with vuln_page.expect_request(
+        lambda r: r.method == "POST" and r.url.endswith("/api/login")
+    ) as info:
+        vuln_page.click("#login-btn")
+    body = info.value.post_data_json
+    # The password never leaves as a password — only its SHA-256 digest does.
+    assert "password" not in body
+    assert len(body["password_digest"]) == 64
+
+
 def test_client_computes_and_sends_a_signature(
     vuln_page: Page, vuln_loopback_url: str
 ) -> None:

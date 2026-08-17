@@ -17,6 +17,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class DigestLoginRequest(BaseModel):
+    """The vulnerable login body: the client posts a SHA-256 digest, not the password."""
+
+    account_id: str
+    password_digest: str
+
+
 class OrderCreateRequest(BaseModel):
     part_number: str
     quantity: int = Field(gt=0)
@@ -42,6 +49,9 @@ class SignedOrderRequest(BaseModel):
     line_total_cents: int
     within_limit: bool | None = None
     requires_supervisor: bool | None = None
+    # The weak pickup-code sink: the client mints and posts the code and the epoch it used.
+    pickup_code: str | None = None
+    created_at_epoch: int | None = None
 
 
 class AccountOut(BaseModel):
