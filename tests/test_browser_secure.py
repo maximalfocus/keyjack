@@ -31,7 +31,7 @@ def _login(page: Page, base_url: str, account_id: str) -> None:
 
 
 def test_served_client_ships_no_key_or_client_crypto(page: Page, base_url: str) -> None:
-    source = page.request.get(f"{base_url}/static/secure/client.js").text()
+    source = page.request.get(f"{base_url}/static/app/client.js").text()
     for marker in FORBIDDEN_CLIENT_MARKERS:
         assert marker not in source, f"secure client must not contain {marker!r}"
     assert SECRET_LITERAL.search(source) is None, "secure client must ship no secret literal"

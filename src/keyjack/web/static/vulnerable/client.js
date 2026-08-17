@@ -33,15 +33,23 @@ function money(cents) {
 }
 
 // The canonical serialization the server recomputes and verifies. Must match the server.
+// The verdict lines are appended only when present.
 function canonicalOrder(o) {
-  return [
+  const lines = [
     `part_number=${o.part_number}`,
     `quantity=${o.quantity}`,
     `work_order_id=${o.work_order_id}`,
     `unit_price_cents=${o.unit_price_cents}`,
     `restricted=${o.restricted ? "true" : "false"}`,
     `line_total_cents=${o.line_total_cents}`,
-  ].join("\n");
+  ];
+  if (o.within_limit !== undefined) {
+    lines.push(`within_limit=${o.within_limit ? "true" : "false"}`);
+  }
+  if (o.requires_supervisor !== undefined) {
+    lines.push(`requires_supervisor=${o.requires_supervisor ? "true" : "false"}`);
+  }
+  return lines.join("\n");
 }
 
 // HMAC-SHA256 with the embedded key, via WebCrypto. Conventional, correct — and pointless
@@ -166,15 +174,20 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     const part = catalog.find((p) => p.part_number === $("part-select").value);
     const qty = Math.max(1, parseInt($("quantity").value || "1", 10));
-    // The client signs the catalog's real facts. The signature is honest here; the flaw is
-    // that the *key* to make one is public, so a forger can sign false facts just as well.
+    // The client signs the catalog's real facts and its own computed verdict. Honest here;
+    // the flaw is that the *key* to make a signature is public, so a forger can sign false
+    // facts and a false verdict just as well.
+    const lineTotal = part.unit_price_cents * qty;
+    const withinLimit = lineTotal <= me.approval_limit_cents;
     const order = {
       part_number: part.part_number,
       quantity: qty,
       work_order_id: $("work-order-select").value,
       unit_price_cents: part.unit_price_cents,
       restricted: part.restricted,
-      line_total_cents: part.unit_price_cents * qty,
+      line_total_cents: lineTotal,
+      within_limit: withinLimit,
+      requires_supervisor: part.restricted || !withinLimit,
     };
     const signature = await sign(canonicalOrder(order));
     const res = await api("/api/orders", {

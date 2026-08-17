@@ -133,8 +133,12 @@ def configure_logging() -> None:
     audit_logger.propagate = False
 
 
-def build_app(title: str, settings: Settings) -> tuple[FastAPI, AppRuntime]:
-    """Create a FastAPI app with the database seeded and shared state wired."""
+def build_app(title: str, settings: Settings, client_subdir: str) -> tuple[FastAPI, AppRuntime]:
+    """Create a FastAPI app with the database seeded and shared state wired.
+
+    Each app serves **only** its own client under ``/static/app`` plus shared, key-free assets
+    under ``/static/shared`` — so a variant never serves another variant's client source.
+    """
 
     configure_logging()
     engine = make_engine(settings)
@@ -153,13 +157,21 @@ def build_app(title: str, settings: Settings) -> tuple[FastAPI, AppRuntime]:
     # A decoy hash so an unknown account costs the same as a wrong password: no timing oracle.
     app.state.decoy_hash = hasher.hash("decoy-not-a-real-credential")
 
-    app.mount("/static", StaticFiles(directory=_WEB / "static"), name="static")
+    app.mount("/static/shared", StaticFiles(directory=_WEB / "static" / "shared"),
+              name="shared")
+    app.mount("/static/app", StaticFiles(directory=_WEB / "static" / client_subdir),
+              name="client")
     templates = Jinja2Templates(directory=str(_WEB / "templates"))
     return app, AppRuntime(settings, session_factory, hasher, templates)
 
 
 def register_pages(
-    app: FastAPI, rt: AppRuntime, *, vulnerable: bool, client_src: str
+    app: FastAPI,
+    rt: AppRuntime,
+    *,
+    vulnerable: bool,
+    client_src: str,
+    client_config_key: str | None = None,
 ) -> None:
     templates = rt.templates
     settings = rt.settings
@@ -176,9 +188,15 @@ def register_pages(
 
     @app.get("/api/client-config")
     def client_config() -> dict[str, object]:
-        # Neither the secure nor the (source-embedded-key) vulnerable client is handed a
-        # key here. The half-fixed variant overrides this route to serve one at runtime.
-        return {"app_name": "keyjack", "mode": settings.mode, "vulnerable": vulnerable}
+        # The secure and source-embedded-key clients are handed no key here. The half-fixed
+        # variant "removes the key from the source" and serves it at runtime instead —
+        # which changes nothing, because it still arrives at the client.
+        config: dict[str, object] = {
+            "app_name": "keyjack", "mode": settings.mode, "vulnerable": vulnerable
+        }
+        if client_config_key is not None:
+            config["signing_key"] = client_config_key
+        return config
 
 
 def register_auth(app: FastAPI, rt: AppRuntime) -> None:

@@ -23,15 +23,21 @@ server-side KDF (Argon2id), and each pickup code from a CSPRNG. The dependency-f
 submits order *intent* only and keeps a purely cosmetic "this needs supervisor approval" hint to prove
 a client-side check is a fine affordance and a worthless control.
 
-**The first vulnerable contrast (opt-in): an embedded signing key.** A vulnerable variant whose client
-holds an HMAC key as a source constant and signs the order body with WebCrypto. The server verifies the
-signature **correctly** — canonical serialization, constant-time compare, tampered bodies rejected —
-and is defeated anyway, because the key is shipped to every browser. A forged order for a restricted
-part, signed with false price and restriction fields, is auto-approved. The browserless attacker CLI
-reproduces it with no browser at all. Against the secure app the identical request changes nothing.
+**Vulnerable contrasts (opt-in).** A vulnerable variant whose client holds an HMAC key as a source
+constant, signs the order body with WebCrypto, and posts its own authorization verdict. The server
+verifies the signature **correctly** and is defeated anyway, because the key is shipped to every
+browser: a forged order for a restricted part — false price and restriction fields, or a flipped
+`within_limit` / `requires_supervisor` verdict — is auto-approved.
 
-Later increments add the remaining sinks (client-computed verdict, client-hashed credential, weak
-pickup code), the half-fixed variant, the integrated comparison run, and the full walkthrough.
+**The half-fixed variant.** Applies every plausible remediation — server-side verification retained,
+the key removed from the source file and served from `/api/client-config` at runtime, the client
+minified, the verdict itself signed — and falls anyway, because the key still reaches the client, now
+over the wire. The harness reads it straight out of the browser's network activity; the CLI reads it
+from the same response.
+
+Against the secure app every one of these requests changes nothing. Later increments add the
+client-hashed credential and weak pickup-code sinks, the integrated comparison run, and the full
+walkthrough.
 
 ## Requirements
 
@@ -64,14 +70,17 @@ The vulnerable app is **absent from the default `docker compose up`** and refuse
 ### Browserless attacker CLI
 
 The `keyjack-attack` tool reproduces each attack over plain HTTP, with no browser — the proof that the
-client was never a boundary. Against a running vulnerable app:
+client was never a boundary. Each subcommand reads the key it needs, forges a signed order for the
+restricted part, submits it, and prints the key's source, the request, the response, and the state.
 
 ```sh
-keyjack-attack --base-url http://127.0.0.1:8001 embedded-key
-```
+# against the vulnerable app (http://127.0.0.1:8001):
+keyjack-attack --base-url http://127.0.0.1:8001 embedded-key      # forge price/restriction
+keyjack-attack --base-url http://127.0.0.1:8001 client-verdict    # forge the verdict
 
-It reads the signing key straight out of the served client, signs a forged order for the restricted
-part, submits it, and prints the key's source, the request, the response, and the resulting state.
+# against the half-fixed app (http://127.0.0.1:8002): the key is read from its runtime config
+keyjack-attack --base-url http://127.0.0.1:8002 half-fixed
+```
 
 Fresh deterministic state is seeded on every start. Demo accounts:
 
@@ -83,8 +92,9 @@ Fresh deterministic state is seeded on every start. Demo accounts:
 
 ## Layout
 
-- `src/keyjack/` — the application package (`apps/secure.py` and `apps/vulnerable.py` are the entry
-  points; `apps/common.py` holds the shared model, auth, read surface, and workflow).
+- `src/keyjack/` — the application package (`apps/secure.py`, `apps/vulnerable.py`, and
+  `apps/halffixed.py` are the entry points; `apps/common.py` holds the shared model, auth, read
+  surface, and workflow; `apps/bodytrusting.py` is the shared vulnerable order route).
 - `src/keyjack/signing.py` — the HMAC canonicalization and verification for the vulnerable contrast.
 - `src/keyjack/attacker/` — the browserless attacker CLI (`keyjack-attack`).
 - `src/keyjack/web/` — the readable, no-build clients (templates and static assets).

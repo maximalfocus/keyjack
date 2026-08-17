@@ -20,6 +20,7 @@ from playwright.sync_api import Browser, Page, sync_playwright
 
 BASE_URL = os.environ.get("KEYJACK_BASE_URL", "http://127.0.0.1:8000")
 VULN_BASE_URL = os.environ.get("KEYJACK_VULN_BASE_URL", "")
+HALFFIXED_BASE_URL = os.environ.get("KEYJACK_HALFFIXED_BASE_URL", "")
 
 
 def _pipe(src: socket.socket, dst: socket.socket) -> None:
@@ -55,18 +56,17 @@ def _forward_handler(target: tuple[str, int]) -> type[socketserver.BaseRequestHa
     return Handler
 
 
-@pytest.fixture(scope="session")
-def vuln_loopback_url() -> Iterator[str]:
-    """A 127.0.0.1 forwarder to the vulnerable app.
+def _loopback_forwarder(base_url: str, missing_msg: str) -> Iterator[str]:
+    """Yield a 127.0.0.1 URL forwarding to ``base_url``.
 
     Driving the client over a loopback origin gives the browser a secure context — exactly
     what a human running the demo on 127.0.0.1 gets — so the client's WebCrypto signing works.
     """
 
-    if not VULN_BASE_URL:
-        pytest.skip("vulnerable app not enabled (KEYJACK_VULN_BASE_URL unset)")
-    parsed = urlparse(VULN_BASE_URL)
-    target = (parsed.hostname or "vulnerable-app", parsed.port or 8000)
+    if not base_url:
+        pytest.skip(missing_msg)
+    parsed = urlparse(base_url)
+    target = (parsed.hostname or "localhost", parsed.port or 8000)
     server = _ForwardServer(("127.0.0.1", 0), _forward_handler(target))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -74,6 +74,16 @@ def vuln_loopback_url() -> Iterator[str]:
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture(scope="session")
+def vuln_loopback_url() -> Iterator[str]:
+    yield from _loopback_forwarder(VULN_BASE_URL, "vulnerable app not enabled")
+
+
+@pytest.fixture(scope="session")
+def halffixed_loopback_url() -> Iterator[str]:
+    yield from _loopback_forwarder(HALFFIXED_BASE_URL, "half-fixed app not enabled")
 
 
 @pytest.fixture
@@ -109,6 +119,33 @@ def vuln_api(vuln_base_url: str) -> Iterator[httpx.Client]:
 @pytest.fixture
 def vuln_page(browser: Browser, vuln_base_url: str) -> Iterator[Page]:
     context = browser.new_context(base_url=vuln_base_url)
+    pg = context.new_page()
+    try:
+        yield pg
+    finally:
+        context.close()
+
+
+@pytest.fixture
+def halffixed_base_url() -> str:
+    if not HALFFIXED_BASE_URL:
+        pytest.skip("half-fixed app not enabled (KEYJACK_HALFFIXED_BASE_URL unset)")
+    try:
+        httpx.get(f"{HALFFIXED_BASE_URL}/health", timeout=5.0)
+    except httpx.HTTPError:
+        pytest.skip("half-fixed app not reachable")
+    return HALFFIXED_BASE_URL
+
+
+@pytest.fixture
+def halffixed_api(halffixed_base_url: str) -> Iterator[httpx.Client]:
+    with httpx.Client(base_url=halffixed_base_url, timeout=15.0) as client:
+        yield client
+
+
+@pytest.fixture
+def halffixed_page(browser: Browser, halffixed_base_url: str) -> Iterator[Page]:
+    context = browser.new_context(base_url=halffixed_base_url)
     pg = context.new_page()
     try:
         yield pg
