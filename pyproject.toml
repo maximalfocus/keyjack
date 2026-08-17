@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 keyjack-attack = "keyjack.attacker.cli:main"
+keyjack-compare = "keyjack.attacker.compare:main"
 
 [project.optional-dependencies]
 dev = [
