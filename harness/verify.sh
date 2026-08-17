@@ -12,4 +12,9 @@ mypy
 echo "== pytest =="
 pytest
 
+if [ -n "${KEYJACK_VULN_BASE_URL:-}" ] && [ -n "${KEYJACK_HALFFIXED_BASE_URL:-}" ]; then
+  echo "== comparison (browserless driver; browser driver ran under pytest) =="
+  keyjack-compare
+fi
+
 echo "== verification complete =="

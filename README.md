@@ -43,9 +43,17 @@ minified, the verdict itself signed — and falls anyway, because the key still 
 over the wire. The harness reads it straight out of the browser's network activity; the CLI reads it
 from the same response.
 
-Against the secure app every one of these requests changes nothing. Later increments add the
-client-hashed credential and weak pickup-code sinks, the integrated comparison run, and the full
-walkthrough.
+Against the secure app every one of these requests changes nothing.
+
+**The full walkthrough** — the four sinks, the converging outcome, the half-fixed variant, each fix,
+the terminology, the bounded-enumeration boundary, and the legitimate-client-side-crypto dividing
+line — is in [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md). One command prints the whole three-axis
+comparison (every sink × the three apps × the secure contrast):
+
+```sh
+KEYJACK_ACK_VULNERABLE=i-understand-this-is-intentionally-vulnerable \
+  docker compose --profile verify run --rm harness keyjack-compare
+```
 
 ## Requirements
 
