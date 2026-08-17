@@ -1,12 +1,38 @@
 # keyjack — local-only educational stack.
 #
-# `demo` is an internal network with no egress: the app and the verification harness talk
-# to each other here and cannot reach any external host. `edge` exists only so the app can
-# publish a loopback-only port for manual exploration. The harness is never on `edge`.
+# `demo` is an internal network with no egress: every service talks to every other here and
+# cannot reach any external host. `edge` exists only so an app can publish a loopback-only
+# port for manual exploration. The harness is never on `edge`.
 #
-#   Verify (local + CI):  docker compose up --build --abort-on-container-exit --exit-code-from harness
-#   Explore the app:      docker compose up --build app     # then open http://127.0.0.1:8000
-#   Tear down:            docker compose down -v
+#   Explore the SECURE app:   docker compose up --build app   # then open http://127.0.0.1:8000
+#   Full verification (CI):   KEYJACK_ACK_VULNERABLE=i-understand-this-is-intentionally-vulnerable \
+#                               docker compose --profile verify up --build \
+#                               --abort-on-container-exit --exit-code-from harness
+#   Explore the VULNERABLE app (two deliberate opt-ins — profile AND acknowledgement):
+#                             KEYJACK_ACK_VULNERABLE=i-understand-this-is-intentionally-vulnerable \
+#                               docker compose --profile vulnerable up --build vulnerable-app
+#   Tear down:                docker compose down -v
+
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /data
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+x-healthcheck: &healthcheck
+  test:
+    - CMD
+    - python
+    - -c
+    - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"
+  interval: 3s
+  timeout: 4s
+  retries: 30
+  start_period: 5s
 
 services:
   app:
@@ -17,31 +43,40 @@ services:
       KEYJACK_MODE: secure
       KEYJACK_DB_URL: "sqlite+pysqlite:////data/keyjack.db"
       KEYJACK_RESEED: "1"
-    read_only: true
-    tmpfs:
-      - /data
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    <<: *hardening
     ports:
       - "127.0.0.1:8000:8000"
-    networks:
-      - demo
-      - edge
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"
-      interval: 3s
-      timeout: 4s
-      retries: 30
-      start_period: 5s
+    networks: [demo, edge]
+    healthcheck: *healthcheck
+
+  # Intentionally vulnerable — absent from the default path (profile) and refuses to start
+  # without the explicit acknowledgement env var (the two deliberate opt-in actions).
+  vulnerable-app:
+    profiles: [verify, vulnerable]
+    build:
+      context: .
+    image: keyjack-app
+    command:
+      - uvicorn
+      - keyjack.apps.vulnerable:create_vulnerable_app
+      - --factory
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+    environment:
+      KEYJACK_MODE: vulnerable
+      KEYJACK_DB_URL: "sqlite+pysqlite:////data/keyjack.db"
+      KEYJACK_RESEED: "1"
+      KEYJACK_ACK_VULNERABLE: "${KEYJACK_ACK_VULNERABLE:-}"
+    <<: *hardening
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks: [demo, edge]
+    healthcheck: *healthcheck
 
   harness:
+    profiles: [verify]
     build:
       context: .
       dockerfile: harness/Dockerfile
@@ -49,10 +84,13 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      vulnerable-app:
+        condition: service_healthy
     environment:
       KEYJACK_BASE_URL: "http://app:8000"
-    networks:
-      - demo
+      KEYJACK_VULN_BASE_URL: "http://vulnerable-app:8000"
+      KEYJACK_IN_DEMO_NET: "1"
+    networks: [demo]
 
 networks:
   demo:

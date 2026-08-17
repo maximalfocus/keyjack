@@ -27,6 +27,18 @@ class PickupRequest(BaseModel):
     code: str
 
 
+class SignedOrderRequest(BaseModel):
+    """The vulnerable app's order body: the client signs price/restriction/total and the
+    server trusts them once the signature verifies. Forgeable by anyone holding the key."""
+
+    part_number: str
+    quantity: int = Field(gt=0)
+    work_order_id: str
+    unit_price_cents: int
+    restricted: bool
+    line_total_cents: int
+
+
 class AccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

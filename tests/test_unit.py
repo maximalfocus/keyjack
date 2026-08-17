@@ -79,3 +79,20 @@ def test_pickup_code_is_high_entropy_and_unique() -> None:
 
 def test_session_tokens_unique() -> None:
     assert new_session_token() != new_session_token()
+
+
+def test_signature_round_trip_and_tamper() -> None:
+    from keyjack.signing import canonical_order_string, sign, verify
+
+    message = canonical_order_string(
+        part_number="PN-7741", quantity=1, work_order_id="WO-1001",
+        unit_price_cents=1, restricted=False, line_total_cents=1,
+    )
+    sig = sign("a-key", message)
+    assert verify("a-key", message, sig) is True
+    assert verify("a-key", message, "00" * 32) is False
+    tampered = canonical_order_string(
+        part_number="PN-7741", quantity=1, work_order_id="WO-1001",
+        unit_price_cents=189_000, restricted=True, line_total_cents=189_000,
+    )
+    assert verify("a-key", tampered, sig) is False

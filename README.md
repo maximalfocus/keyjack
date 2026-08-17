@@ -16,16 +16,22 @@ demonstration data.
 
 ## What is in this increment
 
-This is the **secure baseline**: the reference application that does everything right, with **no
-vulnerable code**. The server re-derives every security-relevant fact from state it holds — the
-price and restriction from its own catalog, the authorization verdict from the authenticated actor's
-server-held approval limit, the credential from a server-side KDF (Argon2id), and each pickup code
-from a CSPRNG. The dependency-free browser client submits order *intent* only and keeps a purely
-cosmetic "this needs supervisor approval" hint to prove a client-side check is a fine affordance and
-a worthless control.
+**The secure baseline.** The reference application that does everything right: the server re-derives
+every security-relevant fact from state it holds — the price and restriction from its own catalog, the
+authorization verdict from the authenticated actor's server-held approval limit, the credential from a
+server-side KDF (Argon2id), and each pickup code from a CSPRNG. The dependency-free browser client
+submits order *intent* only and keeps a purely cosmetic "this needs supervisor approval" hint to prove
+a client-side check is a fine affordance and a worthless control.
 
-The intentionally vulnerable contrast, the browserless attacker CLI, and the full walkthrough are
-delivered in later increments.
+**The first vulnerable contrast (opt-in): an embedded signing key.** A vulnerable variant whose client
+holds an HMAC key as a source constant and signs the order body with WebCrypto. The server verifies the
+signature **correctly** — canonical serialization, constant-time compare, tampered bodies rejected —
+and is defeated anyway, because the key is shipped to every browser. A forged order for a restricted
+part, signed with false price and restriction fields, is auto-approved. The browserless attacker CLI
+reproduces it with no browser at all. Against the secure app the identical request changes nothing.
+
+Later increments add the remaining sinks (client-computed verdict, client-hashed credential, weak
+pickup code), the half-fixed variant, the integrated comparison run, and the full walkthrough.
 
 ## Requirements
 
@@ -35,16 +41,37 @@ application, its tests, the linters, and the headless browser all run inside con
 ## Run it
 
 ```sh
-# Verify everything (linters, type checks, unit + API + headless-browser tests) through the same
-# container boundary that CI uses:
-docker compose up --build --abort-on-container-exit --exit-code-from harness
-
-# Explore the secure app by hand, then open http://127.0.0.1:8000
+# Explore the SECURE app by hand, then open http://127.0.0.1:8000
 docker compose up --build app
 
+# Full verification (linters, type checks, unit + API + CLI + headless-browser tests) across the
+# secure AND the opt-in vulnerable app — the same boundary CI uses. Two deliberate opt-ins are
+# required to bring the vulnerable app up: the non-default `verify` profile and the acknowledgement.
+KEYJACK_ACK_VULNERABLE=i-understand-this-is-intentionally-vulnerable \
+  docker compose --profile verify up --build --abort-on-container-exit --exit-code-from harness
+
+# Explore the intentionally VULNERABLE app (same two opt-ins), then open http://127.0.0.1:8001
+KEYJACK_ACK_VULNERABLE=i-understand-this-is-intentionally-vulnerable \
+  docker compose --profile vulnerable up --build vulnerable-app
+
 # Tear everything down (removes ephemeral state):
-docker compose down -v
+docker compose --profile verify down -v
 ```
+
+The vulnerable app is **absent from the default `docker compose up`** and refuses to start unless
+**both** the non-default profile and the `KEYJACK_ACK_VULNERABLE` acknowledgement are present.
+
+### Browserless attacker CLI
+
+The `keyjack-attack` tool reproduces each attack over plain HTTP, with no browser — the proof that the
+client was never a boundary. Against a running vulnerable app:
+
+```sh
+keyjack-attack --base-url http://127.0.0.1:8001 embedded-key
+```
+
+It reads the signing key straight out of the served client, signs a forged order for the restricted
+part, submits it, and prints the key's source, the request, the response, and the resulting state.
 
 Fresh deterministic state is seeded on every start. Demo accounts:
 
@@ -56,9 +83,12 @@ Fresh deterministic state is seeded on every start. Demo accounts:
 
 ## Layout
 
-- `src/keyjack/` — the application package (`apps/secure.py` is the secure entry point).
-- `src/keyjack/web/` — the readable, no-build client (templates and static assets).
+- `src/keyjack/` — the application package (`apps/secure.py` and `apps/vulnerable.py` are the entry
+  points; `apps/common.py` holds the shared model, auth, read surface, and workflow).
+- `src/keyjack/signing.py` — the HMAC canonicalization and verification for the vulnerable contrast.
+- `src/keyjack/attacker/` — the browserless attacker CLI (`keyjack-attack`).
+- `src/keyjack/web/` — the readable, no-build clients (templates and static assets).
 - `harness/` — the Playwright / headless-Chromium verification image.
-- `tests/` — unit, API, in-process, and browser tests.
-- `compose.yaml` — the two-network stack: an internal, egress-free `demo` network for the app and
-  harness, and an `edge` network used only to publish the app's loopback port.
+- `tests/` — unit, API, in-process, browser, opt-in-gate, and containment tests.
+- `compose.yaml` — the two-network stack: an internal, egress-free `demo` network for the apps and
+  harness, and an `edge` network used only to publish loopback ports for manual exploration.
