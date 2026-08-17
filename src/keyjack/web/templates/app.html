@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>keyjack — Ninebark Field Services{% if vulnerable %} (intentionally vulnerable){% endif %}</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Ninebark Field Services — Parts Desk</h1>
+    {% if vulnerable %}
+    <p class="warn-banner">
+      Intentionally vulnerable local educational material. Do not deploy or expose beyond loopback.
+    </p>
+    {% else %}
+    <p class="mode-banner">Secure reference application · local educational material</p>
+    {% endif %}
+  </header>
+
+  <main>
+    <section id="login-view" hidden>
+      <h2>Sign in</h2>
+      <form id="login-form" autocomplete="off">
+        <label>Account
+          <input id="account-id" name="account_id" placeholder="tech-avery" />
+        </label>
+        <label>Password
+          <input id="password" name="password" type="password" />
+        </label>
+        <button id="login-btn" type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="app-view" hidden>
+      <p id="whoami"></p>
+      <button id="logout-btn" type="button">Sign out</button>
+
+      <h2>Place an order</h2>
+      <form id="order-form">
+        <label>Part
+          <select id="part-select" name="part_number"></select>
+        </label>
+        <label>Quantity
+          <input id="quantity" name="quantity" type="number" min="1" value="1" />
+        </label>
+        <label>Work order
+          <select id="work-order-select" name="work_order_id"></select>
+        </label>
+        <!-- UX-only affordance. This hint is a courtesy to the user; the server decides. -->
+        <p id="order-hint" class="hint"></p>
+        <button id="submit-order" type="submit">Submit order</button>
+      </form>
+
+      <h2>Team order queue</h2>
+      <table id="orders-table">
+        <thead>
+          <tr><th>Order</th><th>Tech</th><th>Part</th><th>Qty</th><th>Total</th><th>State</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <section id="supervisor-console" hidden>
+        <h2>Supervisor console</h2>
+        <div id="pending-list"></div>
+      </section>
+
+      <h2>My orders ready for pickup</h2>
+      <div id="my-pickups"></div>
+
+      <h2>Collect an order</h2>
+      <form id="pickup-form">
+        <label>Pickup code
+          <input id="pickup-code" name="code" placeholder="NB-…" />
+        </label>
+        <button id="pickup-btn" type="submit">Collect</button>
+      </form>
+
+      <p id="message" role="status"></p>
+    </section>
+  </main>
+
+  <script src="/static/secure/client.js"></script>
+</body>
+</html>

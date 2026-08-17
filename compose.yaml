@@ -1,0 +1,60 @@
+# keyjack — local-only educational stack.
+#
+# `demo` is an internal network with no egress: the app and the verification harness talk
+# to each other here and cannot reach any external host. `edge` exists only so the app can
+# publish a loopback-only port for manual exploration. The harness is never on `edge`.
+#
+#   Verify (local + CI):  docker compose up --build --abort-on-container-exit --exit-code-from harness
+#   Explore the app:      docker compose up --build app     # then open http://127.0.0.1:8000
+#   Tear down:            docker compose down -v
+
+services:
+  app:
+    build:
+      context: .
+    image: keyjack-app
+    environment:
+      KEYJACK_MODE: secure
+      KEYJACK_DB_URL: "sqlite+pysqlite:////data/keyjack.db"
+      KEYJACK_RESEED: "1"
+    read_only: true
+    tmpfs:
+      - /data
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - demo
+      - edge
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"
+      interval: 3s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+
+  harness:
+    build:
+      context: .
+      dockerfile: harness/Dockerfile
+    image: keyjack-harness
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      KEYJACK_BASE_URL: "http://app:8000"
+    networks:
+      - demo
+
+networks:
+  demo:
+    internal: true
+  edge: {}
